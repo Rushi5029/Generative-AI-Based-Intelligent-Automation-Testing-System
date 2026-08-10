@@ -60,4 +60,6 @@ export interface GeneratedScript {
   testCaseId: string;
   code: string;
   language: string;
+  runHints?: string[];
+  fileName?: string;
 }

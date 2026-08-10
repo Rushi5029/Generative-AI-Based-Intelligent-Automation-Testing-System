@@ -104,6 +104,10 @@ const testRunSchema = new mongoose.Schema(
         type: [
           {
             testCaseId: { type: String, default: '' },
+            scenario: { type: String, default: '' },
+            steps: { type: [String], default: [] },
+            expectedResults: { type: String, default: '' },
+            category: { type: String, default: '' },
             endpoint: { type: String, default: '' },
             method: { type: String, default: 'GET' },
             expectedStatus: { type: Number, default: 200 },

@@ -3,7 +3,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { FileText, Sparkles, Download, Trash2, ChevronDown, ChevronUp, Tag, Clock, Upload, Shield, AlertTriangle, Zap, Grid3X3, CheckCircle2, FileSpreadsheet } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { generateTestCases, detectAmbiguities, assessRisk, generateTraceabilityMatrix, detectDuplicates, calculateCoverage, generateNegativeTestCases } from '../lib/ai-engine';
-import { historyAPI, testCaseAPI } from '../lib/api';
+import { historyAPI, testCaseAPI, aiAPI } from '../lib/api';
 import { v4 as uuidv4 } from 'uuid';
 import { toast } from 'sonner';
 import * as pdfjsLib from 'pdfjs-dist';
@@ -143,7 +143,52 @@ export default function SRSInput() {
     if (!srsText.trim()) return;
     setIsProcessing(true);
     try {
-      const cases = await generateTestCases(srsText);
+      let cases: Awaited<ReturnType<typeof generateTestCases>> = [];
+
+      // Prefer backend LLM (ISTQB-grade prompt) when available; fall back to local high-quality engine
+      try {
+        const res = await aiAPI.generateTestCases({ requirementText: srsText }) as {
+          data?: Array<{
+            testCaseId?: string;
+            scenario?: string;
+            preconditions?: string[] | string;
+            steps?: string[];
+            expectedResults?: string;
+            priority?: 'High' | 'Medium' | 'Low';
+            category?: string;
+            riskScore?: number;
+            _id?: string;
+            id?: string;
+          }>;
+        };
+        const remote = res?.data || [];
+        if (remote.length > 0) {
+          cases = remote.map((tc, idx) => ({
+            id: String(tc._id || tc.id || uuidv4()),
+            testCaseId: tc.testCaseId || `TC-${String(idx + 1).padStart(3, '0')}`,
+            scenario: tc.scenario || `Generated case ${idx + 1}`,
+            preconditions: Array.isArray(tc.preconditions)
+              ? tc.preconditions.join('. ')
+              : String(tc.preconditions || 'System is ready.'),
+            steps: Array.isArray(tc.steps) ? tc.steps : [],
+            expectedResults: tc.expectedResults || '',
+            priority: tc.priority || 'Medium',
+            riskScore: typeof tc.riskScore === 'number' ? tc.riskScore : 50,
+            requirementId: 'REQ-AI',
+            category: (['functional', 'negative', 'edge', 'security', 'boundary'].includes(String(tc.category))
+              ? tc.category
+              : 'functional') as 'functional' | 'negative' | 'edge' | 'security' | 'boundary',
+            tags: [String(tc.category || 'functional')],
+            createdAt: new Date().toISOString(),
+          }));
+        }
+      } catch {
+        // backend unavailable — local engine
+      }
+
+      if (cases.length === 0) {
+        cases = await generateTestCases(srsText);
+      }
       setTestCases(cases);
 
       const [ambiguityResults, negCases] = await Promise.all([

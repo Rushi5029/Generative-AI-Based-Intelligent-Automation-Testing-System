@@ -42,6 +42,9 @@ type RealtimeConfig = {
   checks?: Array<{
     testCaseId: string;
     scenario?: string;
+    steps?: string[];
+    expectedResults?: string;
+    category?: string;
     endpoint: string;
     method: string;
     expectedStatus: number;
@@ -72,12 +75,22 @@ type LiteTestCase = {
   id: string;
   testCaseId: string;
   scenario: string;
+  steps?: string[];
+  expectedResults?: string;
+  category?: string;
+  preconditions?: string | string[];
+  priority?: string;
 };
 
 type StoreTestCaseLite = {
   id?: string;
   testCaseId?: string;
   scenario?: string;
+  steps?: string[];
+  expectedResults?: string;
+  category?: string;
+  preconditions?: string | string[];
+  priority?: string;
 };
 
 function getErrorMessage(error: unknown, fallback: string) {
@@ -117,13 +130,13 @@ export default function TestRuns() {
   const [isLoading, setIsLoading] = useState(false);
   const [streamStatus, setStreamStatus] = useState<'connected' | 'disconnected'>('disconnected');
 
-  const [runType, setRunType] = useState<'command' | 'realtime-tc'>('command');
+  const [runType, setRunType] = useState<'command' | 'realtime-tc'>('realtime-tc');
   const [framework, setFramework] = useState<'playwright' | 'cypress' | 'selenium' | 'other'>('playwright');
   const [command, setCommand] = useState('npx playwright test');
-  const [execute, setExecute] = useState(false);
+  const [execute, setExecute] = useState(true);
   const [externalUrl, setExternalUrl] = useState('');
   const [targetBaseUrl, setTargetBaseUrl] = useState('http://localhost:5001');
-  const [endpointPath, setEndpointPath] = useState('/api/version');
+  const [endpointPath, setEndpointPath] = useState('/api/auth/login');
   const [autoPrepareData, setAutoPrepareData] = useState(true);
   const [variants, setVariants] = useState<RealtimeVariant[]>([
     { label: 'valid-login', method: 'POST', body: { email: 'valid@example.com', password: 'Valid@123' }, expectedStatus: 200, expectedText: 'token', assertionType: 'status+text', maxRetries: 1 },
@@ -155,41 +168,76 @@ export default function TestRuns() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Keep local generated TCs in sync for realtime selection
+  useEffect(() => {
+    if (generatedTestCases.length === 0) return;
+    void loadTestCases();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [generatedTestCases.length]);
+
   const loadTestCases = async () => {
     try {
       const res = await testCaseAPI.getAll({ limit: 100 });
-      const list = (res?.data || []) as Array<{ _id?: string; id?: string; testCaseId?: string; scenario?: string }>;
+      const list = (res?.data || []) as Array<{
+        _id?: string;
+        id?: string;
+        testCaseId?: string;
+        scenario?: string;
+        steps?: string[];
+        expectedResults?: string;
+        category?: string;
+        preconditions?: string | string[];
+        priority?: string;
+      }>;
       const backendMapped = list.map((tc) => ({
         id: String(tc._id || tc.id),
         testCaseId: String(tc.testCaseId || ''),
         scenario: String(tc.scenario || ''),
+        steps: tc.steps || [],
+        expectedResults: String(tc.expectedResults || ''),
+        category: String(tc.category || ''),
+        preconditions: tc.preconditions,
+        priority: tc.priority,
       })).filter((tc) => tc.testCaseId);
 
       const localMapped = generatedTestCases.map((tc, idx) => ({
         id: String(tc.id || `local-${idx}-${tc.testCaseId || ''}`),
         testCaseId: String(tc.testCaseId || ''),
         scenario: String(tc.scenario || ''),
+        steps: tc.steps || [],
+        expectedResults: String(tc.expectedResults || ''),
+        category: String(tc.category || ''),
+        preconditions: tc.preconditions,
+        priority: tc.priority,
       })).filter((tc) => tc.testCaseId);
 
       const mergedMap = new Map<string, LiteTestCase>();
       for (const tc of [...backendMapped, ...localMapped]) {
-        if (!mergedMap.has(tc.testCaseId)) mergedMap.set(tc.testCaseId, tc);
+        const existing = mergedMap.get(tc.testCaseId);
+        if (!existing || (tc.steps && tc.steps.length > (existing.steps?.length || 0))) {
+          mergedMap.set(tc.testCaseId, tc);
+        }
       }
       const merged = Array.from(mergedMap.values());
 
       setTestCases(merged);
       if (merged.length > 0 && selectedTcIds.length === 0) {
-        setSelectedTcIds([merged[0].testCaseId]);
+        setSelectedTcIds(merged.slice(0, Math.min(5, merged.length)).map((t) => t.testCaseId));
       }
     } catch (e: unknown) {
       const localMapped = generatedTestCases.map((tc, idx) => ({
         id: String(tc.id || `local-${idx}-${tc.testCaseId || ''}`),
         testCaseId: String(tc.testCaseId || ''),
         scenario: String(tc.scenario || ''),
+        steps: tc.steps || [],
+        expectedResults: String(tc.expectedResults || ''),
+        category: String(tc.category || ''),
+        preconditions: tc.preconditions,
+        priority: tc.priority,
       })).filter((tc) => tc.testCaseId);
       setTestCases(localMapped);
       if (localMapped.length > 0 && selectedTcIds.length === 0) {
-        setSelectedTcIds([localMapped[0].testCaseId]);
+        setSelectedTcIds(localMapped.slice(0, Math.min(5, localMapped.length)).map((t) => t.testCaseId));
       }
       if (localMapped.length === 0) {
         toast.error(getErrorMessage(e, 'Failed to load test cases'));
@@ -303,52 +351,167 @@ export default function TestRuns() {
         }
         payload.command = '';
         const selectedCases = testCases.filter((tc) => selectedTcIds.includes(tc.testCaseId));
-        const prepareVariantsForScenario = (scenario: string): RealtimeVariant[] => {
-          const lower = scenario.toLowerCase();
-          if (lower.includes('login') || lower.includes('authenticate') || lower.includes('password')) {
-            return [
-              { label: 'valid-credentials', method: 'POST', body: { email: 'qa.valid@example.com', password: 'Valid@123' }, expectedStatus: 200, expectedText: 'token', assertionType: 'status+text', maxRetries: 1 },
-              { label: 'invalid-password', method: 'POST', body: { email: 'qa.valid@example.com', password: 'wrong' }, expectedStatus: 401, expectedText: 'Invalid', assertionType: 'status+text', maxRetries: 0 },
-              { label: 'invalid-email-format', method: 'POST', body: { email: 'bad-format', password: 'Valid@123' }, expectedStatus: 400, expectedText: 'email', assertionType: 'status+text', maxRetries: 0 },
+        const inferEndpoint = (tc: LiteTestCase): string => {
+          const blob = `${tc.scenario} ${(tc.steps || []).join(' ')} ${tc.expectedResults || ''}`.toLowerCase();
+          if (/login|sign.?in|authenticate|credentials|password/.test(blob)) return '/api/auth/login';
+          if (/register|sign.?up|create account/.test(blob)) return '/api/auth/register';
+          if (/profile|me\b/.test(blob)) return '/api/auth/profile';
+          if (/search|filter|query/.test(blob)) return '/api/search';
+          if (/payment|transaction|checkout/.test(blob)) return '/api/payments';
+          if (/test.?case|testcase/.test(blob)) return '/api/test-cases';
+          if (/health|version|status/.test(blob)) return '/api/version';
+          return endpointPath.trim() || '/api/auth/login';
+        };
+
+        const prepareVariantsForTc = (tc: LiteTestCase): RealtimeVariant[] => {
+          const blob = `${tc.scenario} ${(tc.steps || []).join(' ')} ${tc.expectedResults || ''} ${tc.category || ''}`.toLowerCase();
+          const isNegative = tc.category === 'negative' || /invalid|wrong|fail|reject|missing|unauthorized/.test(blob);
+          const isSecurity = tc.category === 'security' || /xss|injection|unauthorized|authz|csrf/.test(blob);
+          const expectedPassText = (() => {
+            const m = (tc.expectedResults || '').match(/["'`]([^"'`]{2,40})["'`]/);
+            if (m) return m[1];
+            if (/token/.test(blob)) return 'token';
+            if (/success|registered|created/.test(blob)) return 'success';
+            if (/dashboard/.test(blob)) return 'dashboard';
+            return '';
+          })();
+
+          if (/login|authenticate|credentials|password|sign.?in/.test(blob)) {
+            const variantsForLogin: RealtimeVariant[] = [
+              {
+                label: 'valid-credentials',
+                method: 'POST',
+                body: { email: 'qa.valid@example.com', password: 'Valid@12345' },
+                expectedStatus: 200,
+                expectedText: expectedPassText || 'token',
+                assertionType: 'status+text',
+                maxRetries: 1,
+              },
+              {
+                label: 'invalid-password',
+                method: 'POST',
+                body: { email: 'qa.valid@example.com', password: 'wrong' },
+                expectedStatus: 401,
+                expectedText: 'Invalid',
+                assertionType: 'status+text',
+                maxRetries: 0,
+              },
+              {
+                label: 'missing-password',
+                method: 'POST',
+                body: { email: 'qa.valid@example.com' },
+                expectedStatus: 400,
+                expectedText: 'required',
+                assertionType: 'status+text',
+                maxRetries: 0,
+              },
             ];
+            return isNegative || isSecurity ? variantsForLogin.slice(1) : variantsForLogin;
           }
-          if (lower.includes('register') || lower.includes('signup')) {
+
+          if (/register|sign.?up/.test(blob)) {
             const unique = `user${Date.now()}@example.com`;
             return [
-              { label: 'valid-signup', method: 'POST', body: { name: 'QA User', email: unique, password: 'Valid@123', company: 'AI Test Org', department: 'QA' }, expectedStatus: 201, expectedText: 'registered', assertionType: 'status+text', maxRetries: 1 },
-              { label: 'missing-password', method: 'POST', body: { name: 'QA User', email: unique }, expectedStatus: 400, expectedText: 'required', assertionType: 'status+text', maxRetries: 0 },
+              {
+                label: 'valid-signup',
+                method: 'POST',
+                body: { name: 'QA User', email: unique, password: 'Valid@12345' },
+                expectedStatus: 201,
+                expectedText: expectedPassText || 'success',
+                assertionType: expectedPassText ? 'status+text' : 'status',
+                maxRetries: 1,
+              },
+              {
+                label: 'duplicate-or-invalid',
+                method: 'POST',
+                body: { name: 'QA User', email: 'bad-format', password: '123' },
+                expectedStatus: 400,
+                expectedText: '',
+                assertionType: 'status',
+                maxRetries: 0,
+              },
             ];
           }
-          if (lower.includes('search')) {
+
+          if (/payment|transaction|checkout/.test(blob)) {
             return [
-              { label: 'valid-query', method: 'GET', body: null, expectedStatus: 200, expectedText: '', assertionType: 'status', maxRetries: 1 },
-              { label: 'empty-query', method: 'GET', body: null, expectedStatus: 200, expectedText: '', assertionType: 'status', maxRetries: 1 },
+              {
+                label: 'valid-payment',
+                method: 'POST',
+                body: { amount: 100, currency: 'USD', cardNumber: '4111111111111111', cvv: '123' },
+                expectedStatus: 200,
+                expectedText: expectedPassText,
+                assertionType: expectedPassText ? 'status+text' : 'status',
+                maxRetries: 1,
+              },
+              {
+                label: 'invalid-card',
+                method: 'POST',
+                body: { amount: 100, currency: 'USD', cardNumber: '123', cvv: '12' },
+                expectedStatus: 400,
+                expectedText: '',
+                assertionType: 'status',
+                maxRetries: 0,
+              },
             ];
           }
-          if (lower.includes('payment') || lower.includes('transaction')) {
+
+          if (isSecurity) {
             return [
-              { label: 'valid-payment', method: 'POST', body: { amount: 100, currency: 'USD', cardNumber: '4111111111111111', cvv: '123' }, expectedStatus: 200, expectedText: '', assertionType: 'status', maxRetries: 1 },
-              { label: 'invalid-card', method: 'POST', body: { amount: 100, currency: 'USD', cardNumber: '123', cvv: '12' }, expectedStatus: 400, expectedText: '', assertionType: 'status', maxRetries: 0 },
+              {
+                label: 'unauthenticated',
+                method: 'GET',
+                body: null,
+                headers: {},
+                expectedStatus: 401,
+                expectedText: '',
+                assertionType: 'status',
+                maxRetries: 0,
+              },
+              {
+                label: 'injection-probe',
+                method: 'POST',
+                body: { q: "' OR '1'='1", note: '<script>alert(1)</script>' },
+                expectedStatus: 400,
+                expectedText: '',
+                assertionType: 'status',
+                maxRetries: 0,
+              },
             ];
           }
+
           return [
-            { label: 'baseline', method: 'GET', body: null, expectedStatus: 200, expectedText: '', assertionType: 'status', maxRetries: 1 },
-            { label: 'negative-expectation', method: 'GET', body: null, expectedStatus: 404, expectedText: '', assertionType: 'status', maxRetries: 0 },
+            {
+              label: isNegative ? 'negative-expectation' : 'baseline-success',
+              method: isNegative ? 'POST' : 'GET',
+              body: isNegative ? { invalid: true } : null,
+              expectedStatus: isNegative ? 400 : 200,
+              expectedText: expectedPassText,
+              assertionType: expectedPassText ? 'status+text' : 'status',
+              maxRetries: isNegative ? 0 : 1,
+            },
           ];
         };
 
         payload.realtimeConfig = {
           targetBaseUrl: targetBaseUrl.trim(),
           variants,
-          checks: selectedCases.map((tc) => ({
-            testCaseId: tc.testCaseId,
-            scenario: tc.scenario,
-            endpoint: endpointPath.trim(),
-            method: 'GET',
-            expectedStatus: 200,
-            expectedText: '',
-            variants: autoPrepareData ? prepareVariantsForScenario(tc.scenario) : variants,
-          })),
+          checks: selectedCases.map((tc) => {
+            const ep = autoPrepareData ? inferEndpoint(tc) : endpointPath.trim();
+            const tcVariants = autoPrepareData ? prepareVariantsForTc(tc) : variants;
+            return {
+              testCaseId: tc.testCaseId,
+              scenario: tc.scenario,
+              steps: tc.steps || [],
+              expectedResults: tc.expectedResults || '',
+              category: tc.category || '',
+              endpoint: ep,
+              method: tcVariants[0]?.method || 'GET',
+              expectedStatus: tcVariants[0]?.expectedStatus || 200,
+              expectedText: tcVariants[0]?.expectedText || '',
+              variants: tcVariants,
+            };
+          }),
         };
       }
 

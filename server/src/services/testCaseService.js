@@ -1,48 +1,83 @@
 import TestCase from '../models/TestCase.js';
 import Requirement from '../models/Requirement.js';
+import mongoose from 'mongoose';
 import llmService from '../utils/llm-service.js';
 import AILog from '../models/AILog.js';
 import logger from '../utils/logger.js';
 import { getAISettings, resolvePromptForAction } from './promptTemplateService.js';
 
-export const generateAutomationScript = async (testCaseId, framework, userId) => {
+export const generateAutomationScript = async (testCaseId, framework, userId, inlineTestCase = null) => {
   const startTime = Date.now();
 
   try {
-    const testCase = await TestCase.findById(testCaseId);
+    let testCase = null;
+    if (testCaseId) {
+      const query = { userId };
+      if (mongoose.Types.ObjectId.isValid(testCaseId) && String(new mongoose.Types.ObjectId(testCaseId)) === String(testCaseId)) {
+        query.$or = [{ _id: testCaseId }, { testCaseId }];
+      } else {
+        query.testCaseId = testCaseId;
+      }
+      testCase = await TestCase.findOne(query);
+    }
+    if (!testCase && inlineTestCase) {
+      testCase = {
+        testCaseId: inlineTestCase.testCaseId || 'TC-INLINE',
+        scenario: inlineTestCase.scenario,
+        preconditions: inlineTestCase.preconditions || [],
+        steps: inlineTestCase.steps || [],
+        expectedResults: inlineTestCase.expectedResults || '',
+        priority: inlineTestCase.priority || 'Medium',
+        category: inlineTestCase.category || 'functional',
+      };
+    }
 
     if (!testCase) {
       throw new Error('Test case not found');
     }
 
-    const prompt = `
-    Generate a ${framework} automation script for this test case.
-    
-    Test Case:
-    - Scenario: ${testCase.scenario}
-    - Preconditions: ${testCase.preconditions.join(', ')}
-    - Steps: ${testCase.steps.join(', ')}
-    - Expected Results: ${testCase.expectedResults}
-    
-    Provide complete, production-ready code with:
-    1. Proper imports
-    2. Setup and teardown
-    3. Page objects if applicable
-    4. Assertions
-    5. Error handling
-    6. Comments
-    
-    Framework: ${framework}
-    `;
+    const preconditions = Array.isArray(testCase.preconditions)
+      ? testCase.preconditions.join('\n- ')
+      : String(testCase.preconditions || '');
+    const steps = Array.isArray(testCase.steps)
+      ? testCase.steps.map((s, i) => `${i + 1}. ${s}`).join('\n')
+      : String(testCase.steps || '');
 
-    const response = await llmService.generateCompletion(prompt, 3000);
+    const prompt = `
+You are a Senior SDET. Generate a COMPLETE, RUNNABLE ${framework} automation script for THIS exact test case.
+Do NOT return a generic template. Convert each step into real automation commands with realistic selectors and test data.
+
+Test Case ID: ${testCase.testCaseId}
+Scenario: ${testCase.scenario}
+Priority: ${testCase.priority || 'Medium'}
+Category: ${testCase.category || 'functional'}
+Preconditions:
+- ${preconditions}
+Steps:
+${steps}
+Expected Results: ${testCase.expectedResults}
+
+Requirements:
+1. Proper imports, setup/teardown
+2. One code statement (or small block) per step with the step as a comment
+3. Realistic selectors (name/role/label/css) derived from the step text
+4. Assertions mapped from Expected Results
+5. Ready to execute as-is (no placeholders like TODO or "your code here")
+6. Return ONLY the code (optionally inside a markdown fence)
+
+Framework: ${framework}
+`;
+
+    const response = await llmService.generateCompletion(prompt, 3500, {
+      temperature: 0.2,
+      systemPrompt: 'You are an expert SDET who writes production-ready UI automation. Output only executable code.',
+    });
 
     const scriptCode = extractCodeBlock(response.content);
 
-    // Save automation script
     const automationScript = {
       userId,
-      testCaseId,
+      testCaseId: testCase._id || testCase.testCaseId,
       framework,
       language: getLanguageForFramework(framework),
       code: scriptCode,
@@ -58,7 +93,7 @@ export const generateAutomationScript = async (testCaseId, framework, userId) =>
       executionTime: Date.now() - startTime,
     });
 
-    logger.info(`Generated automation script for test case ${testCaseId}`);
+    logger.info(`Generated automation script for test case ${testCase.testCaseId || testCaseId}`);
 
     return automationScript;
   } catch (error) {

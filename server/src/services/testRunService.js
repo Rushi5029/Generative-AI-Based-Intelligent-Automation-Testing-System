@@ -64,6 +64,10 @@ function resolveRunCwd() {
 function normalizeCheck(check) {
   return {
     testCaseId: String(check?.testCaseId || '').trim(),
+    scenario: String(check?.scenario || '').trim(),
+    steps: Array.isArray(check?.steps) ? check.steps.map(String) : [],
+    expectedResults: String(check?.expectedResults || '').trim(),
+    category: String(check?.category || '').trim(),
     endpoint: String(check?.endpoint || '').trim(),
     method: String(check?.method || 'GET').toUpperCase(),
     expectedStatus: Number.isFinite(Number(check?.expectedStatus)) ? Number(check.expectedStatus) : 200,
@@ -176,6 +180,7 @@ async function executeRealtimeTcRun(doc) {
 
   for (const check of checks) {
     const tc = tcById.get(check.testCaseId);
+    const scenario = tc?.scenario || check.scenario || 'Unknown test case';
     const endpoint = check.endpoint.startsWith('/') ? check.endpoint : `/${check.endpoint}`;
     const url = `${targetBaseUrl}${endpoint}`;
     const method = ['GET', 'POST', 'PUT', 'DELETE', 'PATCH'].includes(check.method) ? check.method : 'GET';
@@ -188,7 +193,7 @@ async function executeRealtimeTcRun(doc) {
       const requestSnippet = variant.body ? JSON.stringify(variant.body).slice(0, 300) : '';
       let result = {
         testCaseId: check.testCaseId,
-        scenario: tc?.scenario || 'Unknown test case',
+        scenario,
         variantLabel: variant.label,
         endpoint,
         method: variantMethod,

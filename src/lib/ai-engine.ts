@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type { TestCase, AmbiguityIssue, RiskAssessment, TraceabilityEntry, DuplicatePair, CoverageData, AutomationFramework, GeneratedScript } from './types';
+import { generateExecutableAutomationScript } from './automation-codegen';
 
 const VAGUE_WORDS = [
   'appropriate', 'adequate', 'reasonable', 'sufficient', 'fast', 'slow',
@@ -79,7 +80,7 @@ function calculateRiskScore(text: string): number {
 }
 
 export async function generateTestCases(srsText: string): Promise<TestCase[]> {
-  await delay(1500);
+  await delay(800);
   const requirements = extractRequirements(srsText);
   const testCases: TestCase[] = [];
   let tcCounter = 1;
@@ -88,61 +89,214 @@ export async function generateTestCases(srsText: string): Promise<TestCase[]> {
     const priority = determinePriority(req.text);
     const risk = calculateRiskScore(req.text);
     const lower = req.text.toLowerCase();
+    const tags = extractTags(req.text);
+    const feature = summarizeFeature(req.text);
 
-    // Positive test case
+    // 1) Happy path / functional
     testCases.push({
       id: uuidv4(),
       testCaseId: `TC-${String(tcCounter++).padStart(3, '0')}`,
-      scenario: `Verify ${req.text.substring(0, 80)}`,
+      scenario: `Verify ${feature} works with valid inputs (happy path)`,
       preconditions: generatePrecondition(req.text),
-      steps: generateSteps(req.text, 'positive'),
-      expectedResults: `System successfully processes the requirement: ${req.text.substring(0, 60)}. All validations pass and expected output is displayed.`,
+      steps: buildAtomicSteps(req.text, 'positive'),
+      expectedResults: buildExpected(req.text, 'positive'),
       priority,
       riskScore: risk,
       requirementId: req.id,
       category: 'functional',
-      tags: extractTags(req.text),
+      tags,
       createdAt: new Date().toISOString(),
     });
 
-    // Validation test case
-    if (lower.includes('input') || lower.includes('form') || lower.includes('field') || lower.includes('enter')) {
-      testCases.push({
-        id: uuidv4(),
-        testCaseId: `TC-${String(tcCounter++).padStart(3, '0')}`,
-        scenario: `Validate input constraints for: ${req.text.substring(0, 60)}`,
-        preconditions: generatePrecondition(req.text),
-        steps: generateSteps(req.text, 'validation'),
-        expectedResults: 'System displays appropriate validation messages for invalid inputs. Form submission is prevented until all validations pass.',
-        priority: 'High',
-        riskScore: Math.min(100, risk + 15),
-        requirementId: req.id,
-        category: 'functional',
-        tags: [...extractTags(req.text), 'validation'],
-        createdAt: new Date().toISOString(),
-      });
-    }
+    // 2) Negative / invalid input
+    testCases.push({
+      id: uuidv4(),
+      testCaseId: `TC-${String(tcCounter++).padStart(3, '0')}`,
+      scenario: `Verify ${feature} rejects invalid/missing required inputs`,
+      preconditions: generatePrecondition(req.text),
+      steps: buildAtomicSteps(req.text, 'negative'),
+      expectedResults: buildExpected(req.text, 'negative'),
+      priority: 'High',
+      riskScore: Math.min(100, risk + 10),
+      requirementId: req.id,
+      category: 'negative',
+      tags: [...tags, 'negative'],
+      createdAt: new Date().toISOString(),
+    });
 
-    // Security test case
-    if (SECURITY_KEYWORDS.some(kw => lower.includes(kw))) {
+    // 3) Boundary (always — BVA is industry standard for each requirement)
+    testCases.push({
+      id: uuidv4(),
+      testCaseId: `TC-${String(tcCounter++).padStart(3, '0')}`,
+      scenario: `Verify boundary values for ${feature}`,
+      preconditions: generatePrecondition(req.text),
+      steps: buildAtomicSteps(req.text, 'boundary'),
+      expectedResults: buildExpected(req.text, 'boundary'),
+      priority: 'Medium',
+      riskScore: Math.min(100, risk + 5),
+      requirementId: req.id,
+      category: 'boundary',
+      tags: [...tags, 'boundary', 'bva'],
+      createdAt: new Date().toISOString(),
+    });
+
+    // 4) Security when relevant
+    if (SECURITY_KEYWORDS.some(kw => lower.includes(kw)) || /user|account|data|api|admin|payment/.test(lower)) {
       testCases.push({
         id: uuidv4(),
         testCaseId: `TC-${String(tcCounter++).padStart(3, '0')}`,
-        scenario: `Security verification for: ${req.text.substring(0, 60)}`,
-        preconditions: 'Security testing environment is configured. Test user accounts with various permission levels are available.',
-        steps: generateSteps(req.text, 'security'),
-        expectedResults: 'System enforces security controls. Unauthorized access attempts are blocked. Security logs are generated for audit.',
+        scenario: `Verify security controls for ${feature} (authz / injection / session)`,
+        preconditions: 'Security test environment is ready. Valid and unauthorized accounts exist. Proxy/logging enabled.',
+        steps: buildAtomicSteps(req.text, 'security'),
+        expectedResults: buildExpected(req.text, 'security'),
         priority: 'High',
         riskScore: Math.min(100, risk + 20),
         requirementId: req.id,
         category: 'security',
-        tags: [...extractTags(req.text), 'security'],
+        tags: [...tags, 'security'],
         createdAt: new Date().toISOString(),
       });
     }
   }
 
   return testCases;
+}
+
+function summarizeFeature(text: string): string {
+  const cleaned = text.replace(/^(the system shall|system must|users? (should|must|can)|admin users must)\s+/i, '').trim();
+  return cleaned.length > 70 ? `${cleaned.slice(0, 70)}...` : cleaned;
+}
+
+function buildExpected(text: string, type: string): string {
+  const feature = summarizeFeature(text);
+  if (type === 'positive') {
+    return `1) ${feature} completes successfully. 2) UI/API returns success indicator. 3) Persisted state matches submitted valid data. 4) No unexpected errors in logs.`;
+  }
+  if (type === 'negative') {
+    return `1) Request/action is rejected. 2) Clear field-level or API error message is shown. 3) No partial/invalid data is persisted. 4) HTTP/status or UI state remains consistent with failure.`;
+  }
+  if (type === 'boundary') {
+    return `1) Min and max valid boundary values are accepted. 2) Just-outside boundary values are rejected with validation errors. 3) System remains stable (no crash).`;
+  }
+  return `1) Unauthorized/malicious attempts are blocked. 2) No sensitive data leakage. 3) Security event is logged. 4) Session/token integrity preserved.`;
+}
+
+function buildAtomicSteps(text: string, type: string): string[] {
+  const lower = text.toLowerCase();
+  const isLogin = /login|sign.?in|authenticate|credentials/.test(lower);
+  const isRegister = /register|sign.?up|create account/.test(lower);
+  const isSearch = /search|filter|query/.test(lower);
+  const isPayment = /payment|transaction|checkout/.test(lower);
+  const isApi = /api|endpoint|rest|jwt|token/.test(lower);
+
+  if (type === 'positive') {
+    if (isLogin) {
+      return [
+        'Navigate to "/login"',
+        'Enter valid email "qa.valid@example.com" in the email field',
+        'Enter valid password "Valid@12345" in the password field',
+        'Click the "Login" button',
+        'Verify URL contains "dashboard" or home page is displayed',
+        'Verify success indicator or authenticated user menu is visible',
+      ];
+    }
+    if (isRegister) {
+      return [
+        'Navigate to "/register"',
+        'Enter name "QA Tester"',
+        'Enter unique email "qa.user+{timestamp}@example.com"',
+        'Enter password "Valid@12345"',
+        'Click the "Register" / "Sign Up" button',
+        'Verify account creation success message is displayed',
+      ];
+    }
+    if (isSearch) {
+      return [
+        'Navigate to the search page',
+        'Enter search query "test"',
+        'Click Search / press Enter',
+        'Verify results list is displayed',
+        'Verify each result is relevant to query "test"',
+      ];
+    }
+    if (isPayment) {
+      return [
+        'Navigate to checkout/payment page',
+        'Enter amount "100"',
+        'Enter card number "4111111111111111"',
+        'Enter CVV "123"',
+        'Click "Pay" / "Submit Payment"',
+        'Verify payment success confirmation is displayed',
+      ];
+    }
+    if (isApi) {
+      return [
+        'Obtain a valid authentication token',
+        'Send request to the target API endpoint with valid payload',
+        'Verify response status is 2xx',
+        'Verify response body contains expected fields',
+        'Verify server audit/log entry is created',
+      ];
+    }
+    return [
+      'Navigate to the feature under test',
+      'Prepare and enter valid test data in all required fields',
+      'Click the primary action / Submit button',
+      'Verify success message or expected outcome is displayed',
+      'Verify persisted data matches input',
+    ];
+  }
+
+  if (type === 'negative') {
+    if (isLogin) {
+      return [
+        'Navigate to "/login"',
+        'Enter email "qa.valid@example.com"',
+        'Enter invalid password "wrong"',
+        'Click the "Login" button',
+        'Verify error message about invalid credentials is displayed',
+        'Verify user is not redirected to dashboard',
+      ];
+    }
+    return [
+      'Navigate to the feature under test',
+      'Leave required fields empty or enter invalid values',
+      'Attempt to submit the form / execute the action',
+      'Verify validation/error messages are displayed',
+      'Verify no invalid data is saved',
+    ];
+  }
+
+  if (type === 'boundary') {
+    if (/password/.test(lower)) {
+      return [
+        'Navigate to password/input form',
+        'Enter password with length just below minimum (e.g. 7 chars if min=8)',
+        'Attempt submit and verify rejection',
+        'Enter password at exact minimum length with required character classes',
+        'Verify acceptance at minimum boundary',
+        'Enter excessively long password beyond max length and verify rejection/truncation policy',
+      ];
+    }
+    return [
+      'Navigate to the input form',
+      'Enter minimum allowed value and submit — verify acceptance',
+      'Enter maximum allowed value and submit — verify acceptance',
+      'Enter value just below minimum — verify rejection',
+      'Enter value just above maximum — verify rejection',
+    ];
+  }
+
+  // security
+  return [
+    'Attempt to access the feature without authentication',
+    'Verify access is denied (401/403 or login redirect)',
+    'Login with a low-privilege user',
+    'Attempt to access another user\'s resource / admin action',
+    'Submit payload containing XSS/SQL injection strings in input fields',
+    'Verify malicious input is rejected or safely encoded and no script executes',
+    'Verify security/audit log captures the failed attempt',
+  ];
 }
 
 function generatePrecondition(text: string): string {
@@ -492,169 +646,7 @@ export async function generateNegativeTestCases(srsText: string): Promise<TestCa
 }
 
 export function generateAutomationScript(testCase: TestCase, framework: AutomationFramework): GeneratedScript {
-  const generators: Record<AutomationFramework, () => string> = {
-    'selenium-java': () => generateSeleniumJava(testCase),
-    'selenium-python': () => generateSeleniumPython(testCase),
-    'cypress': () => generateCypress(testCase),
-    'playwright': () => generatePlaywright(testCase),
-  };
-
-  const langMap: Record<AutomationFramework, string> = {
-    'selenium-java': 'java',
-    'selenium-python': 'python',
-    'cypress': 'javascript',
-    'playwright': 'typescript',
-  };
-
-  return {
-    framework,
-    testCaseId: testCase.testCaseId,
-    code: generators[framework](),
-    language: langMap[framework],
-  };
-}
-
-function generateSeleniumJava(tc: TestCase): string {
-  const className = tc.testCaseId.replace(/-/g, '_');
-
-  const stepCode = tc.steps.map((s, i) => {
-    let code = `        // Step ${i + 1}: ${s}\n`;
-    const lower = s.toLowerCase();
-
-    if (lower.includes('navigate')) code += `        driver.get("http://localhost:5173/");`;
-    else if (lower.includes('username')) code += `        driver.findElement(By.name("username")).sendKeys("admin");`;
-    else if (lower.includes('password')) code += `        driver.findElement(By.name("password")).sendKeys("password123");`;
-    else if (lower.includes('click') && lower.includes('login')) code += `        driver.findElement(By.xpath("//button[contains(text(), 'Login') or contains(translate(text(), 'L', 'l'), 'login')]")).click();`;
-    else if (lower.includes('verify') && (lower.includes('success') || lower.includes('dashboard'))) code += `        assertTrue(driver.getCurrentUrl().contains("dashboard") || driver.getPageSource().toLowerCase().contains("dashboard"));`;
-    else if (lower.includes('enter') || lower.includes('input')) code += `        driver.findElement(By.tagName("input")).sendKeys("test data");`;
-    else if (lower.includes('click') || lower.includes('submit')) code += `        driver.findElement(By.xpath("//button[@type='submit']")).click();`;
-    else if (lower.includes('verify')) code += `        assertTrue(!driver.getPageSource().contains("Error"));`;
-    else code += `        Thread.sleep(1000);`;
-
-    return code;
-  }).join('\n\n');
-
-  return `import org.openqa.selenium.WebDriver;
-import org.openqa.selenium.WebElement;
-import org.openqa.selenium.By;
-import org.openqa.selenium.chrome.ChromeDriver;
-import org.junit.jupiter.api.*;
-import static org.junit.jupiter.api.Assertions.*;
-
-/**
- * Test Case: ${tc.testCaseId}
- * Scenario: ${tc.scenario}
- */
-public class ${className}Test {
-    private WebDriver driver;
-
-    @BeforeEach
-    public void setUp() {
-        System.setProperty("webdriver.chrome.driver", "path/to/chromedriver");
-        driver = new ChromeDriver();
-        driver.manage().window().maximize();
-    }
-
-    @Test
-    @DisplayName("${tc.scenario}")
-    public void test_${className.toLowerCase()}() throws InterruptedException {
-${stepCode}
-    }
-
-    @AfterEach
-    public void tearDown() {
-        if (driver != null) {
-            driver.quit();
-        }
-    }
-}`;
-}
-
-function generateSeleniumPython(tc: TestCase): string {
-  const methodName = tc.testCaseId.replace(/-/g, '_').toLowerCase();
-
-  const stepCode = tc.steps.map((s, i) => {
-    let code = `        # Step ${i + 1}: ${s}\n`;
-    const lower = s.toLowerCase();
-
-    if (lower.includes('navigate')) code += `        driver.get("http://localhost:5173/")\n        time.sleep(1)`;
-    else if (lower.includes('username')) code += `        driver.find_element("name", "username").send_keys("admin")`;
-    else if (lower.includes('password')) code += `        driver.find_element("name", "password").send_keys("password123")`;
-    else if (lower.includes('click') && lower.includes('login')) code += `        driver.find_element("xpath", "//button[contains(translate(text(), 'L', 'l'), 'login')]").click()`;
-    else if (lower.includes('verify') && (lower.includes('success') || lower.includes('dashboard'))) code += `        assert "dashboard" in driver.current_url.lower() or "dashboard" in driver.page_source.lower()`;
-    else if (lower.includes('enter') || lower.includes('input') || lower.includes('provide')) code += `        inputs = driver.find_elements("tag name", "input")\n        for inp in inputs:\n            inp.send_keys("test data")`;
-    else if (lower.includes('click') || lower.includes('submit')) code += `        driver.find_element("xpath", "//button[@type='submit']").click()`;
-    else if (lower.includes('verify')) code += `        time.sleep(2)\n        assert "Error" not in driver.page_source`;
-    else code += `        time.sleep(1)`;
-
-    return code;
-  }).join('\n\n');
-
-  return `import pytest
-import time
-from selenium import webdriver
-
-class Test${tc.testCaseId.replace(/-/g, '')}:
-    def test_${methodName}(self):
-        driver = webdriver.Chrome()
-${stepCode}
-        driver.quit()`;
-}
-
-function generateCypress(tc: TestCase): string {
-  const stepCode = tc.steps.map((s, i) => {
-    let code = `    // Step ${i + 1}: ${s}\n`;
-    const lower = s.toLowerCase();
-
-    if (lower.includes('navigate')) code += `    cy.visit('/');`;
-    else if (lower.includes('username')) code += `    cy.get('input[name="username"]').type('admin');`;
-    else if (lower.includes('password')) code += `    cy.get('input[name="password"]').type('password123');`;
-    else if (lower.includes('click') && lower.includes('login')) code += `    cy.contains('button', /login/i).click();`;
-    else if (lower.includes('verify') && (lower.includes('success') || lower.includes('dashboard'))) code += `    cy.url().should('include', '/dashboard');`;
-    else if (lower.includes('enter') || lower.includes('input')) code += `    cy.get('input').first().type('test data');`;
-    else if (lower.includes('click') || lower.includes('submit')) code += `    cy.get('button[type="submit"]').click();`;
-    else if (lower.includes('verify')) code += `    cy.contains('error', { matchCase: false }).should('not.exist');`;
-    else code += `    cy.wait(1000);`;
-
-    return code;
-  }).join('\n\n');
-
-  return `describe("${tc.testCaseId}: ${tc.scenario}", () => {
-  beforeEach(() => {
-    cy.viewport(1280, 720);
-  });
-
-  it("should execute test successfully", () => {
-${stepCode}
-  });
-});`;
-}
-
-function generatePlaywright(tc: TestCase): string {
-  const stepCode = tc.steps.map((s, i) => {
-    let code = `    // Step ${i + 1}: ${s}\n`;
-    const lower = s.toLowerCase();
-
-    if (lower.includes('navigate')) code += `    await page.goto('/');`;
-    else if (lower.includes('username')) code += `    await page.locator('input[name="username"]').fill('admin');`;
-    else if (lower.includes('password')) code += `    await page.locator('input[name="password"]').fill('password123');`;
-    else if (lower.includes('click') && lower.includes('login')) code += `    await page.getByRole('button', { name: /login/i }).click();`;
-    else if (lower.includes('verify') && (lower.includes('success') || lower.includes('dashboard'))) code += `    await expect(page).toHaveURL(/.*dashboard/);`;
-    else if (lower.includes('enter') || lower.includes('input')) code += `    await page.locator('input').first().fill('test data');`;
-    else if (lower.includes('click') || lower.includes('submit')) code += `    await page.locator('button[type="submit"]').click();`;
-    else if (lower.includes('verify')) code += `    await expect(page.locator('text=error')).not.toBeVisible();`;
-    else code += `    await page.waitForTimeout(1000);`;
-
-    return code;
-  }).join('\n\n');
-
-  return `import { test, expect } from '@playwright/test';
-
-test.describe("${tc.testCaseId}", () => {
-  test("${tc.scenario}", async ({ page }) => {
-${stepCode}
-  });
-});`;
+  return generateExecutableAutomationScript(testCase, framework);
 }
 
 export function generateAPIEndpoints(): object {

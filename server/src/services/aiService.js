@@ -33,28 +33,42 @@ export const generateTestCasesFromRequirement = async (requirementText, userId, 
   try {
     const settings = await getAISettings(userId, projectId);
     const defaultPrompt = `
-    Analyze the following requirement and generate 5-7 detailed test cases.
-    For each test case, provide:
-    1. Scenario (brief description)
-    2. Preconditions (list as array)
-    3. Steps (list as array)
-    4. Expected Results
-    5. Priority (High/Medium/Low) based on importance
-    6. Category (functional/negative/edge/security/boundary)
-    
-    Requirement: "{{requirementText}}"
-    
-    Return as JSON array with objects containing: scenario, preconditions, steps, expectedResults, priority, category
-    `;
+You are a Senior QA Engineer (ISTQB Advanced, 10+ years). Analyze the requirement and produce HIGH-ACCURACY test cases that a professional QA team would write.
+
+Requirement:
+"""
+{{requirementText}}
+"""
+
+Generate 6-10 test cases covering:
+- Happy path / functional
+- Negative (invalid/missing data)
+- Boundary value analysis (min/max/just-inside/just-outside)
+- Security (authn/authz, injection, session) when relevant
+- At least one edge/error-recovery case
+
+QUALITY RULES (mandatory):
+1. Scenario must be specific and measurable (not "verify the system works").
+2. Preconditions must be concrete and environment-ready.
+3. Steps must be atomic, numbered actions a tester can execute without guessing (include example test data in quotes).
+4. Expected Results must be observable (UI message, status code, persisted state, redirect).
+5. Priority: High for security/auth/payment/data-loss risks; Medium otherwise; Low for cosmetic.
+6. Category must be one of: functional, negative, edge, security, boundary.
+7. Trace each case clearly to the requirement intent.
+8. Avoid vague words (appropriate, fast, user-friendly, etc.).
+
+Return ONLY a JSON array of objects with keys:
+scenario, preconditions (array of strings), steps (array of strings), expectedResults (string), priority, category
+`;
 
     const prompt =
       (await resolvePromptForAction(userId, projectId, 'generate_test_cases', { requirementText })) ||
       defaultPrompt.replaceAll('{{requirementText}}', requirementText);
 
-    const response = await llmService.generateCompletion(prompt, settings.maxTokens || 2000, {
+    const response = await llmService.generateCompletion(prompt, settings.maxTokens || 3500, {
       model: settings.model || undefined,
-      temperature: settings.temperature,
-      systemPrompt: settings.systemPrompt,
+      temperature: typeof settings.temperature === 'number' ? Math.min(settings.temperature, 0.35) : 0.25,
+      systemPrompt: settings.systemPrompt || 'You are a Senior QA Engineer writing ISTQB-compliant, production-grade test cases. Be precise, measurable, and complete.',
     });
     const testCases = await llmService.parseJSON(response.content);
 

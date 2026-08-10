@@ -79,19 +79,20 @@ export const prioritizeTestCases = catchAsync(async (req, res) => {
 });
 
 export const generateAutomationScript = catchAsync(async (req, res) => {
-  const { testCaseId, framework } = req.body;
+  const { testCaseId, framework, testCase } = req.body;
 
-  if (!testCaseId || !framework) {
+  if (!framework || (!testCaseId && !testCase)) {
     return res.status(400).json({
       success: false,
-      message: 'Test case ID and framework are required',
+      message: 'Framework and testCase (or testCaseId) are required',
     });
   }
 
   const script = await testCaseService.generateAutomationScript(
     testCaseId,
     framework,
-    req.user.id
+    req.user.id,
+    testCase
   );
 
   res.status(201).json({
