@@ -1,11 +1,14 @@
 import axios from 'axios';
 import crypto from 'crypto';
+import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User.js';
 import config from '../config/index.js';
 import { generateToken } from '../utils/jwt.js';
 import { ValidationError, AuthenticationError } from '../utils/errors.js';
 import logger from '../utils/logger.js';
 import { ensureDefaultProject } from './projectService.js';
+
+const googleClient = new OAuth2Client(config.google?.clientId || undefined);
 
 export const register = async (userData) => {
   const { name, email, password, company, department } = userData;
@@ -161,26 +164,47 @@ export const googleAuth = async ({ credential, idToken, email, name, picture, go
 
   if (tokenToVerify) {
     try {
-      // 1. Verify directly with Google TokenInfo endpoint
-      const tokenInfoRes = await axios.get(
-        `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenToVerify)}`,
-        { timeout: 8000 }
-      );
-      const payload = tokenInfoRes.data;
-
-      if (!payload || !payload.email) {
-        throw new AuthenticationError('Invalid Google token payload');
+      // 1. Primary: Verify using official google-auth-library
+      if (config.google?.clientId) {
+        try {
+          const ticket = await googleClient.verifyIdToken({
+            idToken: tokenToVerify,
+            audience: config.google.clientId,
+          });
+          const payload = ticket.getPayload();
+          if (payload && payload.email) {
+            verifiedEmail = String(payload.email).toLowerCase().trim();
+            verifiedName = String(payload.name || payload.given_name || verifiedEmail.split('@')[0]).trim();
+            verifiedPicture = String(payload.picture || '').trim();
+            verifiedSub = String(payload.sub || '').trim();
+          }
+        } catch (gErr) {
+          logger.warn(`google-auth-library verification ticket error: ${gErr.message}`);
+        }
       }
 
-      // If client ID is configured, verify audience
-      if (config.google?.clientId && payload.aud && payload.aud !== config.google.clientId) {
-        logger.warn(`Google token audience mismatch: ${payload.aud} vs ${config.google.clientId}`);
-      }
+      // 2. TokenInfo endpoint fallback if not yet verified
+      if (!verifiedEmail) {
+        const tokenInfoRes = await axios.get(
+          `https://oauth2.googleapis.com/tokeninfo?id_token=${encodeURIComponent(tokenToVerify)}`,
+          { timeout: 8000 }
+        );
+        const payload = tokenInfoRes.data;
 
-      verifiedEmail = String(payload.email).toLowerCase().trim();
-      verifiedName = String(payload.name || payload.given_name || verifiedEmail.split('@')[0]).trim();
-      verifiedPicture = String(payload.picture || '').trim();
-      verifiedSub = String(payload.sub || '').trim();
+        if (!payload || !payload.email) {
+          throw new AuthenticationError('Invalid Google token payload');
+        }
+
+        // If client ID is configured, verify audience
+        if (config.google?.clientId && payload.aud && payload.aud !== config.google.clientId) {
+          logger.warn(`Google token audience mismatch: ${payload.aud} vs ${config.google.clientId}`);
+        }
+
+        verifiedEmail = String(payload.email).toLowerCase().trim();
+        verifiedName = String(payload.name || payload.given_name || verifiedEmail.split('@')[0]).trim();
+        verifiedPicture = String(payload.picture || '').trim();
+        verifiedSub = String(payload.sub || '').trim();
+      }
     } catch (err) {
       logger.warn(`Google token verification via API failed: ${err.message}. Attempting safe JWT decode...`);
       // Fallback: decode JWT payload if signed Google JWT format (header.payload.signature)

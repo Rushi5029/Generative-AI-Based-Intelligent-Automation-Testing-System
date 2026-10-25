@@ -6,6 +6,7 @@ import {
   GitCompare, FlaskConical, MessageSquare
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
+import { authAPI } from '../lib/api';
 import { useState } from 'react';
 
 const menuItems = [
@@ -29,7 +30,7 @@ const menuItems = [
 ];
 
 export default function Sidebar() {
-  const { activeFeature, setActiveFeature } = useAppStore();
+  const { activeFeature, setActiveFeature, user } = useAppStore();
   const [collapsed, setCollapsed] = useState(false);
 
   return (
@@ -100,9 +101,9 @@ export default function Sidebar() {
 
         <div className={`p-2 rounded-xl transition-all duration-200 ${collapsed ? 'bg-transparent' : 'bg-surface-alt border border-border/50'}`}>
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : 'px-1'}`}>
-            {useAppStore.getState().user?.profilePicture ? (
+            {user?.profilePicture ? (
               <img
-                src={useAppStore.getState().user?.profilePicture}
+                src={user.profilePicture}
                 alt="Avatar"
                 className="w-8 h-8 rounded-full object-cover border border-cyan-500/30 shrink-0 shadow-xs"
                 onError={(e) => {
@@ -116,13 +117,14 @@ export default function Sidebar() {
             )}
             {!collapsed && (
               <div className="flex-1 min-w-0">
-                <p className="text-[12px] font-bold text-foreground truncate">{useAppStore.getState().user?.name || 'User'}</p>
-                <p className="text-[10px] text-muted truncate capitalize">{useAppStore.getState().user?.role || 'QA Analyst'}</p>
+                <p className="text-[12px] font-bold text-foreground truncate">{user?.name || 'User'}</p>
+                <p className="text-[10px] text-muted truncate capitalize">{user?.role || 'QA Analyst'}</p>
               </div>
             )}
             {!collapsed && (
               <button
                 onClick={() => {
+                  try { authAPI.logout().catch(() => {}); } catch {}
                   const store = useAppStore.getState();
                   store.clearUserScopedData();
                   store.setIsAuthenticated(false);
@@ -134,7 +136,7 @@ export default function Sidebar() {
                     .filter((k) => k.startsWith('chatSessionId_'))
                     .forEach((k) => localStorage.removeItem(k));
                 }}
-                className="p-1.5 hover:bg-danger/10 hover:text-danger rounded-lg transition-colors group"
+                className="p-1.5 hover:bg-danger/10 hover:text-danger rounded-lg transition-colors group cursor-pointer"
                 title="Sign Out"
               >
                 <LogOut className="w-3.5 h-3.5" />
@@ -144,6 +146,7 @@ export default function Sidebar() {
           {collapsed && (
             <button
               onClick={() => {
+                try { authAPI.logout().catch(() => {}); } catch {}
                 const store = useAppStore.getState();
                 store.clearUserScopedData();
                 store.setIsAuthenticated(false);
@@ -155,7 +158,7 @@ export default function Sidebar() {
                   .filter((k) => k.startsWith('chatSessionId_'))
                   .forEach((k) => localStorage.removeItem(k));
               }}
-              className="mt-2 w-8 h-8 mx-auto flex items-center justify-center hover:bg-danger/10 hover:text-danger rounded-lg transition-colors"
+              className="mt-2 w-8 h-8 mx-auto flex items-center justify-center hover:bg-danger/10 hover:text-danger rounded-lg transition-colors cursor-pointer"
               title="Sign Out"
             >
               <LogOut className="w-4 h-4" />
