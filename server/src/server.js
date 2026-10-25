@@ -43,18 +43,20 @@ connectDatabaseAsync();
 app.use(
   cors({
     origin: (origin, callback) => {
-      if (config.env === 'development') {
-        // In development, allow requests from any origin to avoid local host/port mismatches.
+      if (!origin) return callback(null, true);
+      if (config.env === 'development' || config.corsOrigin === '*') {
         return callback(null, true);
       }
-      // Allow localhost on any port during development
-      if (!origin || origin.startsWith('http://localhost') || origin.startsWith('http://127.0.0.1')) {
-        callback(null, true);
-      } else {
-        // Only allow explicitly configured origin in non-localhost cases
-        if (origin === config.corsOrigin) return callback(null, true);
-        return callback(new Error(`CORS blocked for origin: ${origin}`));
+      const allowedOrigins = (config.corsOrigin || '').split(',').map((s) => s.trim().replace(/\/$/, ''));
+      if (
+        allowedOrigins.includes(origin) ||
+        origin.endsWith('.vercel.app') ||
+        origin.startsWith('http://localhost') ||
+        origin.startsWith('http://127.0.0.1')
+      ) {
+        return callback(null, true);
       }
+      return callback(new Error(`CORS blocked for origin: ${origin}`));
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
@@ -100,7 +102,8 @@ const PORT = config.port || 5000;
 const server = app.listen(PORT, () => {
   logger.info(`✅ Server started successfully on port ${PORT}`);
   logger.info(`Environment: ${config.env}`);
-  logger.info(`Database: ${process.env.MONGODB_URI}`);
+  const maskedDb = (process.env.MONGODB_URI || '').replace(/:([^:@]+)@/, ':****@');
+  logger.info(`Database: ${maskedDb}`);
 });
 
 // Handle unhandled promise rejections
