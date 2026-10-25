@@ -58,3 +58,14 @@ export const logout = catchAsync(async (req, res) => {
     message: 'Logged out successfully',
   });
 });
+
+export const googleLogin = catchAsync(async (req, res) => {
+  const result = await authService.googleAuth(req.body);
+
+  res.status(200).json({
+    success: true,
+    message: result.message || 'Authenticated successfully with Google',
+    data: result,
+  });
+});
+

@@ -7,6 +7,9 @@ export interface User {
   name: string;
   email: string;
   role: 'Admin' | 'QA' | 'Viewer';
+  profilePicture?: string;
+  authProvider?: 'local' | 'google';
+  isEmailVerified?: boolean;
   preferences?: {
     theme: 'light' | 'dark';
     notifications: boolean;

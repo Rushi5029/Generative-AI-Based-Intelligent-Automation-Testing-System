@@ -100,9 +100,20 @@ export default function Sidebar() {
 
         <div className={`p-2 rounded-xl transition-all duration-200 ${collapsed ? 'bg-transparent' : 'bg-surface-alt border border-border/50'}`}>
           <div className={`flex items-center gap-3 ${collapsed ? 'justify-center' : 'px-1'}`}>
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500/20 to-purple-500/20 flex items-center justify-center border border-cyan-500/10 shrink-0">
-              <User className="w-4 h-4 text-cyan-600" />
-            </div>
+            {useAppStore.getState().user?.profilePicture ? (
+              <img
+                src={useAppStore.getState().user?.profilePicture}
+                alt="Avatar"
+                className="w-8 h-8 rounded-full object-cover border border-cyan-500/30 shrink-0 shadow-xs"
+                onError={(e) => {
+                  (e.currentTarget as HTMLElement).style.display = 'none';
+                }}
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500/20 to-purple-500/20 flex items-center justify-center border border-cyan-500/10 shrink-0">
+                <User className="w-4 h-4 text-cyan-600" />
+              </div>
+            )}
             {!collapsed && (
               <div className="flex-1 min-w-0">
                 <p className="text-[12px] font-bold text-foreground truncate">{useAppStore.getState().user?.name || 'User'}</p>

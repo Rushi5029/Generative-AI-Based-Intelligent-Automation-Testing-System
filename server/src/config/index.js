@@ -9,6 +9,11 @@ const config = {
     expire: process.env.JWT_EXPIRE || '7d',
   },
 
+  // Google OAuth Configuration
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+  },
+
   // LLM/AI Configuration
   ai: {
     provider: process.env.AI_PROVIDER || 'openai', // 'openai', 'huggingface', 'gemini', 'claude', 'local'

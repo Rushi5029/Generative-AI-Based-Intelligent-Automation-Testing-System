@@ -33,7 +33,7 @@ const apiClient = axios.create({
   },
 });
 
-async function postAuthWithFallback(path: '/auth/login' | '/auth/register', data: Record<string, unknown>) {
+async function postAuthWithFallback(path: '/auth/login' | '/auth/register' | '/auth/google', data: Record<string, unknown>) {
   try {
     return await apiClient.post(path, data);
   } catch (error) {
@@ -206,8 +206,11 @@ apiClient.interceptors.response.use(
 export const authAPI = {
   register: (data: Record<string, unknown>) => postAuthWithFallback('/auth/register', data),
   login: (email: string, password: string) => postAuthWithFallback('/auth/login', { email, password }),
+  googleLogin: (data: { credential?: string; email?: string; name?: string; picture?: string; googleId?: string }) =>
+    postAuthWithFallback('/auth/google', data),
   logout: () => apiClient.post('/auth/logout'),
   getProfile: () => apiClient.get('/auth/profile'),
+  getMe: () => apiClient.get('/auth/me'),
   updateProfile: (data: Record<string, unknown>) => apiClient.put('/auth/profile', data),
   changePassword: (data: Record<string, unknown>) => apiClient.post('/auth/change-password', data),
 };
