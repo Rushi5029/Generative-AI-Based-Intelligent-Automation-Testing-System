@@ -21,7 +21,7 @@ import healthRoutes from './routes/healthRoutes.js';
 const app = express();
 
 // Database Connection
-const connectDatabaseAsync = async () => {
+const connectDatabaseAsync = async (retryCount = 0) => {
   try {
     await connectDB();
     // Rebuild indexes so ChatSession uniqueness is per-user+project (not global sessionId)
@@ -32,8 +32,11 @@ const connectDatabaseAsync = async () => {
       logger.warn(`ChatSession index sync skipped: ${idxErr.message}`);
     }
   } catch (error) {
-    logger.error(`Failed to connect to database: ${error.message}`);
-    process.exit(1);
+    logger.error(`Database connection attempt ${retryCount + 1} failed: ${error.message}`);
+    if (config.env === 'production' && retryCount < 5) {
+      logger.info('Retrying database connection in 10 seconds...');
+      setTimeout(() => connectDatabaseAsync(retryCount + 1), 10000);
+    }
   }
 };
 
