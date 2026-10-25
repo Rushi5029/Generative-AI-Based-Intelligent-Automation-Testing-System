@@ -128,7 +128,7 @@ async function retryWithGlobalFallback(error: unknown) {
         baseURL: undefined,
         url: joinBaseAndPath(base, originalRequest.url),
       };
-      return await axios(requestClone);
+      return await axios(requestClone as any);
     } catch {
       // try next base
     }

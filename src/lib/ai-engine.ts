@@ -310,47 +310,6 @@ function generatePrecondition(text: string): string {
   return conditions.join('. ') + '.';
 }
 
-function generateSteps(text: string, type: string): string[] {
-  const lower = text.toLowerCase();
-  if (type === 'positive') {
-    const steps = ['Navigate to the relevant module/page'];
-    if (lower.includes('login')) {
-      steps.push('Enter valid username in the username field', 'Enter valid password in the password field', 'Click the Login button', 'Verify successful login and redirection to dashboard');
-    } else if (lower.includes('form') || lower.includes('input') || lower.includes('enter')) {
-      steps.push('Locate the input form', 'Enter valid data in all required fields', 'Review the entered information', 'Submit the form', 'Verify success message and data persistence');
-    } else if (lower.includes('search') || lower.includes('filter')) {
-      steps.push('Locate the search/filter functionality', 'Enter valid search criteria', 'Execute the search', 'Verify results match the search criteria', 'Verify result count and pagination');
-    } else if (lower.includes('report') || lower.includes('export')) {
-      steps.push('Navigate to the reports section', 'Select report parameters', 'Generate the report', 'Verify report data accuracy', 'Export and verify file format');
-    } else {
-      steps.push('Identify the feature under test', 'Prepare valid test data', 'Execute the primary action', 'Verify the expected outcome', 'Validate data integrity');
-    }
-    return steps;
-  } else if (type === 'validation') {
-    return [
-      'Navigate to the input form',
-      'Leave required fields empty and attempt submission',
-      'Verify required field validation messages appear',
-      'Enter invalid format data (e.g., letters in numeric fields)',
-      'Verify format validation messages appear',
-      'Enter data exceeding maximum length limits',
-      'Verify length validation is enforced',
-      'Enter valid data in all fields and submit successfully'
-    ];
-  } else {
-    return [
-      'Attempt access without authentication',
-      'Verify unauthorized access is blocked with appropriate error',
-      'Login with valid credentials',
-      'Attempt to access resources beyond assigned permissions',
-      'Verify role-based access control is enforced',
-      'Test for common vulnerabilities (SQL injection, XSS)',
-      'Verify security headers and encryption are in place',
-      'Review audit logs for security events'
-    ];
-  }
-}
-
 function extractTags(text: string): string[] {
   const tags: string[] = [];
   const lower = text.toLowerCase();

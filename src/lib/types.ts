@@ -11,6 +11,7 @@ export interface TestCase {
   category: 'functional' | 'negative' | 'edge' | 'security' | 'boundary';
   tags: string[];
   createdAt: string;
+  status?: 'Draft' | 'Active' | 'Automated' | 'Deprecated';
   isCovered?: boolean;
 }
 

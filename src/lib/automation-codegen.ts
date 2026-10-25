@@ -18,7 +18,7 @@ export type AutomationAction =
   | { kind: 'custom'; comment: string };
 
 const QUOTED = /["'`]([^"'`]+)["'`]/;
-const BASE_URL = process.env.VITE_APP_BASE_URL || 'http://localhost:5174';
+const BASE_URL = (import.meta as any).env?.VITE_APP_BASE_URL || 'http://localhost:5174';
 
 function extractQuoted(step: string): string | null {
   const m = step.match(QUOTED);
@@ -326,7 +326,7 @@ class Test_${cls}:
     def teardown_method(self):
         self.driver.quit()
 
-    def test_${cls.lower()}(self):
+    def test_${cls.toLowerCase()}(self):
         driver = self.driver
 ${lines.join('\n\n')}
 `;

@@ -3,7 +3,7 @@ import { motion } from 'framer-motion';
 import {
   FileText, AlertTriangle, Shield, BarChart3,
   ArrowUpDown, Code2, Copy, ShieldAlert, Webhook, TrendingUp,
-  GitCompare, FlaskConical, MessageSquare, MessagesSquare, CheckSquare, ClipboardCheck
+  GitCompare, FlaskConical, MessageSquare, MessagesSquare, ClipboardCheck
 } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { aiAPI } from '../lib/api';
