@@ -102,8 +102,8 @@ app.use(errorHandler);
 // Start Server
 const PORT = config.port || 5000;
 
-const server = app.listen(PORT, () => {
-  logger.info(`✅ Server started successfully on port ${PORT}`);
+const server = app.listen(PORT, '0.0.0.0', () => {
+  logger.info(`✅ Server started successfully on port ${PORT} (0.0.0.0)`);
   logger.info(`Environment: ${config.env}`);
   const maskedDb = (process.env.MONGODB_URI || '').replace(/:([^:@]+)@/, ':****@');
   logger.info(`Database: ${maskedDb}`);
