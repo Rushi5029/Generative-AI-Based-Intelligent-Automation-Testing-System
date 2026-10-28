@@ -60,12 +60,18 @@ export default function LoginPage() {
   const handleDirectGoogleDemo = async () => {
     setIsGoogleLoading(true);
     try {
-      const response = (await authAPI.googleLogin({
-        email: 'prathameshshinde0195@gmail.com',
-        name: 'Prathamesh Shinde',
-        picture: 'https://lh3.googleusercontent.com/a/default-user',
-        googleId: 'google_oauth_' + Date.now(),
-      })) as { data?: { user: any; token: string; message?: string } };
+      const timeoutPromise = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Backend connection timeout')), 3500)
+      );
+      const response = (await Promise.race([
+        authAPI.googleLogin({
+          email: 'prathameshshinde0195@gmail.com',
+          name: 'Prathamesh Shinde',
+          picture: 'https://lh3.googleusercontent.com/a/default-user',
+          googleId: 'google_oauth_' + Date.now(),
+        }),
+        timeoutPromise,
+      ])) as { data?: { user: any; token: string; message?: string } };
       if (response?.data) {
         const { user, token, message } = response.data;
         setUser(user);
