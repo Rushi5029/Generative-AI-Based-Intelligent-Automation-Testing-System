@@ -116,10 +116,8 @@ process.on('unhandledRejection', (error) => {
 
 // Handle uncaught exceptions
 process.on('uncaughtException', (error) => {
-  logger.error(`Uncaught Exception: ${error.message}`);
-  if (config.env === 'production') {
-    process.exit(1);
-  }
+  logger.error(`Uncaught Exception: ${error?.message || error}`);
+  // Keep process alive to allow health checks and retry logic to recover
 });
 
 // Graceful shutdown
