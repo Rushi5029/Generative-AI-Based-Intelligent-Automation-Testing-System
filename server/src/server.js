@@ -23,7 +23,11 @@ const app = express();
 // Database Connection
 const connectDatabaseAsync = async (retryCount = 0) => {
   try {
-    await connectDB();
+    const conn = await connectDB();
+    if (!conn) {
+      logger.info('Database connection deferred — server active and accepting HTTP requests');
+      return;
+    }
     // Rebuild indexes so ChatSession uniqueness is per-user+project (not global sessionId)
     try {
       const { default: ChatSession } = await import('./models/ChatSession.js');
@@ -33,7 +37,7 @@ const connectDatabaseAsync = async (retryCount = 0) => {
     }
   } catch (error) {
     logger.error(`Database connection attempt ${retryCount + 1} failed: ${error.message}`);
-    if (config.env === 'production' && retryCount < 5) {
+    if (config.env === 'production' && retryCount < 3 && process.env.MONGODB_URI) {
       logger.info('Retrying database connection in 10 seconds...');
       setTimeout(() => connectDatabaseAsync(retryCount + 1), 10000);
     }
