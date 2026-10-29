@@ -3,10 +3,20 @@ import logger from '../utils/logger.js';
 
 const connectDB = async () => {
   const mongoUri = process.env.MONGODB_URI;
+  const isCloudOrProduction =
+    process.env.NODE_ENV === 'production' ||
+    process.env.RENDER === 'true' ||
+    Boolean(process.env.RENDER_SERVICE_ID) ||
+    Boolean(process.env.VERCEL);
 
-  if (!mongoUri) {
-    if (process.env.NODE_ENV === 'production') {
-      logger.warn('⚠️ MONGODB_URI environment variable is not set on Render. MongoDB features are operating in fallback/demo mode. To connect a live database, add MONGODB_URI in your Render Dashboard.');
+  // If in cloud/production and no URI or pointing to localhost/127.0.0.1, skip attempting local connect
+  if (!mongoUri || mongoUri.includes('localhost') || mongoUri.includes('127.0.0.1')) {
+    if (isCloudOrProduction) {
+      logger.warn(
+        '⚠️ No cloud MongoDB Atlas URI found in cloud environment (MONGODB_URI is unset or points to localhost). ' +
+        'Please add your MongoDB Atlas connection string (mongodb+srv://...) in the Render Dashboard -> Environment tab. ' +
+        'Continuing in resilient mode without crashing.'
+      );
       return null;
     }
   }
@@ -23,7 +33,7 @@ const connectDB = async () => {
     return conn;
   } catch (error) {
     logger.error(`Error connecting to MongoDB: ${error.message}`);
-    if (process.env.NODE_ENV === 'production') {
+    if (isCloudOrProduction) {
       logger.warn('⚠️ MongoDB connection could not be established. Server continuing to operate for health checks and API endpoints.');
       return null;
     }
