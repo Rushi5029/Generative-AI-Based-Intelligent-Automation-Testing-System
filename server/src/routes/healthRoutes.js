@@ -1,4 +1,5 @@
 import express from 'express';
+import mongoose from 'mongoose';
 import TestRun from '../models/TestRun.js';
 
 const router = express.Router();
@@ -21,9 +22,19 @@ router.get('/api', (req, res) => {
 });
 
 router.get('/health', (req, res) => {
+  const dbStates = {
+    0: 'disconnected',
+    1: 'connected',
+    2: 'connecting',
+    3: 'disconnecting',
+  };
+  const dbState = dbStates[mongoose.connection.readyState] || 'unknown';
+
   res.status(200).json({
     success: true,
     message: 'Server is running',
+    database: dbState,
+    environment: process.env.NODE_ENV || 'development',
     timestamp: new Date(),
   });
 });

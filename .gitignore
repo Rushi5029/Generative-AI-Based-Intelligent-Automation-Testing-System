@@ -27,3 +27,5 @@ test-results/
 powershell.cmd
 server/powershell.cmd
 .vercel
+server/backups/
+backups/
