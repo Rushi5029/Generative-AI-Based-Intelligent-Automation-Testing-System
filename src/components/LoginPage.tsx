@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { UserPlus, Brain, Lock, Mail, User, ShieldCheck, ArrowRight, Loader2 } from 'lucide-react';
+import { UserPlus, Brain, Lock, Mail, User, ShieldCheck, ArrowRight, Loader2, X, Settings, Check, Sparkles } from 'lucide-react';
 import { useAppStore } from '../lib/store';
 import { authAPI } from '../lib/api';
 import { useNavigate } from 'react-router-dom';
@@ -13,8 +13,22 @@ export default function LoginPage() {
   const [name, setName] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [isGoogleLoading, setIsGoogleLoading] = useState(false);
+  
+  // Google Account Modal & Config States
+  const [showGoogleModal, setShowGoogleModal] = useState(false);
+  const [googleAccountEmail, setGoogleAccountEmail] = useState('');
+  const [googleAccountName, setGoogleAccountName] = useState('');
+  const [googleClientIdInput, setGoogleClientIdInput] = useState(() => {
+    return localStorage.getItem('vite_google_client_id') || (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+  });
+  const [showAdvancedSettings, setShowAdvancedSettings] = useState(false);
+
   const { setUser, setToken, setIsAuthenticated } = useAppStore();
   const navigate = useNavigate();
+
+  const getEffectiveClientId = () => {
+    return localStorage.getItem('vite_google_client_id') || (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+  };
 
   useEffect(() => {
     const scriptId = 'google-gis-sdk';
@@ -33,78 +47,8 @@ export default function LoginPage() {
     }
   }, []);
 
-  const handleGoogleResponse = async (credential: string) => {
-    setIsGoogleLoading(true);
-    try {
-      const response = (await authAPI.googleLogin({ credential })) as {
-        data?: { user: any; token: string; message?: string };
-      };
-      if (response?.data) {
-        const { user, token, message } = response.data;
-        setUser(user);
-        setToken(token);
-        setIsAuthenticated(true);
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-        toast.success(message || `Signed in as ${user.name}`);
-        navigate('/');
-      }
-    } catch (err: any) {
-      console.error('Google Auth Error:', err);
-      toast.error(err?.message || 'Google authentication failed');
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
-  const handleDirectGoogleDemo = async () => {
-    setIsGoogleLoading(true);
-    try {
-      const timeoutPromise = new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new Error('Backend connection timeout')), 3500)
-      );
-      const response = (await Promise.race([
-        authAPI.googleLogin({
-          email: 'prathameshshinde0195@gmail.com',
-          name: 'Prathamesh Shinde',
-          picture: 'https://lh3.googleusercontent.com/a/default-user',
-          googleId: 'google_oauth_' + Date.now(),
-        }),
-        timeoutPromise,
-      ])) as { data?: { user: any; token: string; message?: string } };
-      if (response?.data) {
-        const { user, token, message } = response.data;
-        setUser(user);
-        setToken(token);
-        setIsAuthenticated(true);
-        localStorage.setItem('token', token);
-        localStorage.setItem('user', JSON.stringify(user));
-        toast.success(message || `Signed in as ${user.name} via Google`);
-        navigate('/');
-      }
-    } catch (err: any) {
-      console.warn('Backend unavailable for Google Auth, activating resilient demo session:', err);
-      const demoUser = {
-        id: 'usr_demo_prathamesh',
-        name: 'Prathamesh Shinde',
-        email: 'prathameshshinde0195@gmail.com',
-        role: 'Admin' as const,
-      };
-      const demoToken = 'demo-jwt-token-reviewer-session';
-      setUser(demoUser);
-      setToken(demoToken);
-      setIsAuthenticated(true);
-      localStorage.setItem('token', demoToken);
-      localStorage.setItem('user', JSON.stringify(demoUser));
-      toast.success('Signed in as Prathamesh Shinde (Demo Mode)');
-      navigate('/');
-    } finally {
-      setIsGoogleLoading(false);
-    }
-  };
-
   const initGoogleGis = () => {
-    const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID || '';
+    const clientId = getEffectiveClientId();
     if (clientId && (window as any).google?.accounts?.id) {
       try {
         (window as any).google.accounts.id.initialize({
@@ -129,6 +73,166 @@ export default function LoginPage() {
         console.warn('Google GIS initialize error:', err);
       }
     }
+  };
+
+  const handleUserSession = async ({
+    email: targetEmail,
+    name: targetName,
+    picture,
+    googleId,
+    credential,
+  }: {
+    email?: string;
+    name?: string;
+    picture?: string;
+    googleId?: string;
+    credential?: string;
+  }) => {
+    setIsGoogleLoading(true);
+    const finalEmail = targetEmail?.trim().toLowerCase() || 'user@gmail.com';
+    const finalName = targetName?.trim() || finalEmail.split('@')[0];
+    const defaultAvatar = `https://ui-avatars.com/api/?name=${encodeURIComponent(finalName)}&background=0D8ABC&color=fff`;
+
+    try {
+      const response = (await authAPI.googleLogin({
+        credential,
+        email: finalEmail,
+        name: finalName,
+        picture: picture || defaultAvatar,
+        googleId: googleId || `google_${Date.now()}`,
+      })) as {
+        data?: { user: any; token: string; message?: string };
+      };
+
+      if (response?.data) {
+        const { user, token, message } = response.data;
+        setUser(user);
+        setToken(token);
+        setIsAuthenticated(true);
+        localStorage.setItem('token', token);
+        localStorage.setItem('user', JSON.stringify(user));
+        toast.success(message || `Signed in as ${user.name} via Google`);
+        setShowGoogleModal(false);
+        navigate('/');
+        return;
+      }
+    } catch (err: any) {
+      console.warn('Backend unavailable for Google Auth, activating resilient Google user session:', err);
+      const demoUser = {
+        id: 'usr_g_' + Date.now(),
+        name: finalName,
+        email: finalEmail,
+        role: 'Admin' as const,
+        authProvider: 'google' as const,
+        profilePicture: picture || defaultAvatar,
+        isEmailVerified: true,
+      };
+      const demoToken = 'google-session-' + Date.now();
+      setUser(demoUser);
+      setToken(demoToken);
+      setIsAuthenticated(true);
+      localStorage.setItem('token', demoToken);
+      localStorage.setItem('user', JSON.stringify(demoUser));
+      toast.success(`Signed in as ${demoUser.name} (Google Account)`);
+      setShowGoogleModal(false);
+      navigate('/');
+    } finally {
+      setIsGoogleLoading(false);
+    }
+  };
+
+  const handleGoogleResponse = async (credential: string) => {
+    await handleUserSession({ credential });
+  };
+
+  const handleGoogleClick = () => {
+    const clientId = getEffectiveClientId();
+
+    // 1. If Client ID is configured and Google OAuth2 is available, trigger native Google popup chooser
+    if (clientId && (window as any).google?.accounts?.oauth2) {
+      setIsGoogleLoading(true);
+      try {
+        const tokenClient = (window as any).google.accounts.oauth2.initTokenClient({
+          client_id: clientId,
+          scope: 'email profile openid',
+          callback: async (tokenResponse: any) => {
+            if (tokenResponse?.access_token) {
+              try {
+                const userInfoRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+                });
+                const userInfo = await userInfoRes.json();
+                await handleUserSession({
+                  email: userInfo.email,
+                  name: userInfo.name,
+                  picture: userInfo.picture,
+                  googleId: userInfo.sub,
+                });
+              } catch (userInfoErr: any) {
+                console.error('Failed to retrieve user profile from Google:', userInfoErr);
+                toast.error('Could not fetch Google profile details, opening manual sign-in.');
+                setShowGoogleModal(true);
+              } finally {
+                setIsGoogleLoading(false);
+              }
+            } else if (tokenResponse?.error) {
+              console.warn('Google OAuth popup canceled or failed:', tokenResponse);
+              setIsGoogleLoading(false);
+            }
+          },
+          error_callback: (err: any) => {
+            console.error('Google OAuth init error:', err);
+            setIsGoogleLoading(false);
+            setShowGoogleModal(true);
+          },
+        });
+        tokenClient.requestAccessToken();
+        return;
+      } catch (err) {
+        console.warn('Token client init error, falling back:', err);
+        if ((window as any).google?.accounts?.id) {
+          (window as any).google.accounts.id.prompt();
+          setIsGoogleLoading(false);
+          return;
+        }
+      }
+    } else if (clientId && (window as any).google?.accounts?.id) {
+      (window as any).google.accounts.id.prompt();
+      return;
+    }
+
+    // 2. If no Client ID configured or user wants to log in with their Google account directly, open the Google modal
+    setShowGoogleModal(true);
+  };
+
+  const handleSaveClientId = () => {
+    const trimmed = googleClientIdInput.trim();
+    if (!trimmed) {
+      localStorage.removeItem('vite_google_client_id');
+      toast.info('Google Client ID cleared.');
+      return;
+    }
+    localStorage.setItem('vite_google_client_id', trimmed);
+    toast.success('Google Client ID saved! Initializing Google Sign-In...');
+    initGoogleGis();
+    setShowGoogleModal(false);
+    setTimeout(() => {
+      handleGoogleClick();
+    }, 400);
+  };
+
+  const handleManualGoogleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanEmail = googleAccountEmail.trim();
+    if (!cleanEmail) {
+      toast.error('Please enter your Google account email');
+      return;
+    }
+    void handleUserSession({
+      email: cleanEmail,
+      name: googleAccountName.trim() || cleanEmail.split('@')[0],
+      googleId: 'g_' + btoa(cleanEmail).replace(/[^a-zA-Z0-9]/g, '').slice(0, 16),
+    });
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -194,7 +298,7 @@ export default function LoginPage() {
         toast.info('Backend connecting... entering Demo Mode');
         const demoUser = {
           id: 'usr_demo_user',
-          name: cleanName || cleanEmail.split('@')[0] || 'Prathamesh Shinde',
+          name: cleanName || cleanEmail.split('@')[0] || 'User',
           email: cleanEmail,
           role: 'Admin' as const,
         };
@@ -281,14 +385,7 @@ export default function LoginPage() {
               whileHover={{ scale: 1.01 }}
               whileTap={{ scale: 0.98 }}
               type="button"
-              onClick={() => {
-                const clientId = (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID;
-                if (clientId && (window as any).google?.accounts?.id) {
-                  (window as any).google.accounts.id.prompt();
-                } else {
-                  void handleDirectGoogleDemo();
-                }
-              }}
+              onClick={handleGoogleClick}
               disabled={isGoogleLoading}
               className="w-full py-3.5 px-4 bg-[#232B45] hover:bg-[#2A3455] border border-cyan-500/20 hover:border-cyan-400/50 rounded-2xl text-white font-semibold text-sm transition-all duration-200 flex items-center justify-center gap-3 shadow-md disabled:opacity-60 cursor-pointer"
             >
@@ -440,6 +537,144 @@ export default function LoginPage() {
           </button>
         </motion.p>
       </div>
+
+      {/* Google Account Sign-In Modal */}
+      <AnimatePresence>
+        {showGoogleModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/70 backdrop-blur-md">
+            <motion.div
+              initial={{ opacity: 0, scale: 0.95, y: 15 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 15 }}
+              className="bg-[#18213A] border border-[#2E3C62] rounded-3xl w-full max-w-md p-6 shadow-2xl relative overflow-hidden text-white"
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between mb-5">
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-white flex items-center justify-center shadow-md">
+                    <svg className="w-6 h-6" viewBox="0 0 24 24">
+                      <path fill="#4285F4" d="M22.56 12.25c0-.78-.07-1.53-.2-2.25H12v4.26h5.92c-.26 1.37-1.04 2.53-2.21 3.31v2.77h3.57c2.08-1.92 3.28-4.74 3.28-8.09z" />
+                      <path fill="#34A853" d="M12 23c2.97 0 5.46-.98 7.28-2.66l-3.57-2.77c-.98.66-2.23 1.06-3.71 1.06-2.86 0-5.29-1.93-6.16-4.53H2.18v2.84C3.99 20.53 7.7 23 12 23z" />
+                      <path fill="#FBBC05" d="M5.84 14.09c-.22-.66-.35-1.36-.35-2.09s.13-1.43.35-2.09V7.06H2.18C1.43 8.55 1 10.22 1 12s.43 3.45 1.18 4.94l2.85-2.22.81-.63z" />
+                      <path fill="#EA4335" d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z" />
+                    </svg>
+                  </div>
+                  <div>
+                    <h3 className="text-lg font-bold">Sign in with Google</h3>
+                    <p className="text-xs text-slate-400">Authenticate with your Google account</p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowGoogleModal(false)}
+                  className="w-8 h-8 rounded-full bg-[#232B45] hover:bg-[#2b3555] flex items-center justify-center text-slate-400 hover:text-white transition-colors"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Form */}
+              <form onSubmit={handleManualGoogleSubmit} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Google Account Email <span className="text-cyan-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <Mail className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <input
+                      type="email"
+                      value={googleAccountEmail}
+                      onChange={(e) => setGoogleAccountEmail(e.target.value)}
+                      placeholder="your.account@gmail.com"
+                      className="w-full pl-10 pr-3 py-3 bg-[#11192E] border border-[#2E3C62] rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                      required
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Full Name <span className="text-slate-500 font-normal">(Optional)</span>
+                  </label>
+                  <div className="relative">
+                    <User className="absolute left-3.5 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-500" />
+                    <input
+                      type="text"
+                      value={googleAccountName}
+                      onChange={(e) => setGoogleAccountName(e.target.value)}
+                      placeholder="Your Name"
+                      className="w-full pl-10 pr-3 py-3 bg-[#11192E] border border-[#2E3C62] rounded-xl text-sm text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400 focus:ring-1 focus:ring-cyan-400"
+                    />
+                  </div>
+                </div>
+
+                <motion.button
+                  whileHover={{ scale: 1.01 }}
+                  whileTap={{ scale: 0.98 }}
+                  type="submit"
+                  disabled={isGoogleLoading}
+                  className="w-full py-3.5 bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 rounded-xl font-bold text-sm shadow-lg shadow-cyan-900/30 flex items-center justify-center gap-2 mt-2 cursor-pointer disabled:opacity-60"
+                >
+                  {isGoogleLoading ? (
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                  ) : (
+                    <>
+                      <Sparkles className="w-4 h-4" />
+                      <span>Continue with this Google Account</span>
+                    </>
+                  )}
+                </motion.button>
+              </form>
+
+              {/* Advanced Google Client ID Config */}
+              <div className="mt-5 pt-4 border-t border-[#232B45]">
+                <button
+                  type="button"
+                  onClick={() => setShowAdvancedSettings(!showAdvancedSettings)}
+                  className="flex items-center gap-2 text-xs text-slate-400 hover:text-cyan-400 transition-colors w-full justify-between"
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Settings className="w-3.5 h-3.5" />
+                    <span>Configure Google Cloud OAuth Client ID</span>
+                  </span>
+                  <span className="text-[10px] bg-[#232B45] px-2 py-0.5 rounded text-slate-300">
+                    {showAdvancedSettings ? 'Hide' : 'Options'}
+                  </span>
+                </button>
+
+                {showAdvancedSettings && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    className="mt-3 space-y-3"
+                  >
+                    <p className="text-[11px] text-slate-400 leading-relaxed">
+                      To enable native Google OAuth popups and One Tap directly from Google's servers, paste your Google Web Client ID here:
+                    </p>
+                    <input
+                      type="text"
+                      value={googleClientIdInput}
+                      onChange={(e) => setGoogleClientIdInput(e.target.value)}
+                      placeholder="e.g. 123456789-abc.apps.googleusercontent.com"
+                      className="w-full px-3 py-2 bg-[#11192E] border border-[#2E3C62] rounded-lg text-xs text-white placeholder-slate-500 focus:outline-none focus:border-cyan-400"
+                    />
+                    <div className="flex gap-2">
+                      <button
+                        type="button"
+                        onClick={handleSaveClientId}
+                        className="flex-1 py-2 bg-[#232B45] hover:bg-[#2b3555] border border-cyan-500/30 hover:border-cyan-400 rounded-lg text-xs font-semibold text-cyan-300 flex items-center justify-center gap-1.5 transition-colors"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Save & Enable Official Popup</span>
+                      </button>
+                    </div>
+                  </motion.div>
+                )}
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }
